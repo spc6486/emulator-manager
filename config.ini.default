@@ -1,0 +1,38 @@
+# touch-shim configuration
+#
+# Calibration is read automatically from display-calibrator's udev rule.
+# This file contains emulator paths, behavioral settings, and UI prefs.
+
+[emulators]
+# Paths to emulator binaries (auto-detected on first run if not set)
+sheepshaver_path = ~/SheepShaver/SheepShaver.bin
+basilisk_path = ~/BasiliskII/BasiliskII.bin
+
+[device]
+# Touchscreen evdev path (stable by-id symlink)
+path = /dev/input/by-id/usb-UsbHID_SingWon-CTP-V1.18C_6F6A099B1133-event-if00
+
+# Path to display-calibrator's udev calibration rule
+calibration_rule = /etc/udev/rules.d/99-touchscreen-calibration.rules
+
+[screen]
+# Logical resolution (after compositor scaling)
+width = 1024
+height = 768
+
+[behavior]
+# Milliseconds to delay click after a large position jump
+click_delay_ms = 100
+
+# Seconds to hold before long-press triggers double-click
+long_press_time = 2.0
+
+# Maximum pixel movement allowed during a long press
+hold_tolerance = 30
+
+# Seconds between focus checks (lower = more responsive, more CPU)
+focus_check_interval = 0.25
+
+[ui]
+# Show the tray icon (set to false to hide; reopen from app menu)
+show_tray = true
