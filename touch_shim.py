@@ -20,14 +20,12 @@ import subprocess
 import select
 import configparser
 import argparse
+import glob
 from evdev import InputDevice, ecodes
 
 # ── Defaults (overridden by ~/.config/touch-shim/config.ini) ────────
 
-DEFAULT_DEVICE = (
-    "/dev/input/by-id/"
-    "usb-UsbHID_SingWon-CTP-V1.18C_6F6A099B1133-event-if00"
-)
+DEFAULT_DEVICE = ""
 DEFAULT_UDEV_RULE = "/etc/udev/rules.d/99-touchscreen-calibration.rules"
 DEFAULT_SCREEN_W = 1024
 DEFAULT_SCREEN_H = 768
@@ -201,11 +199,52 @@ def mouse_double_click():
 def run(cfg, window_name):
     """Main event loop: grab, transform, inject."""
 
-    # Open the touchscreen device
-    try:
-        ts = InputDevice(cfg.device_path)
-    except Exception as exc:
-        print(f"[shim] Cannot open {cfg.device_path}: {exc}", file=sys.stderr)
+    # Open the touchscreen device — try configured path, then auto-detect
+    ts = None
+    if cfg.device_path:
+        try:
+            ts = InputDevice(cfg.device_path)
+        except Exception:
+            print(
+                f"[shim] Configured device not found: {cfg.device_path}",
+                flush=True,
+            )
+
+    if ts is None:
+        # Auto-detect: search by-id for SingWon or any CTP touch panel
+        for pattern in ["/dev/input/by-id/*SingWon*event*",
+                        "/dev/input/by-id/*CTP*event*"]:
+            for path in sorted(glob.glob(pattern)):
+                if "-kbd" in path:
+                    continue
+                try:
+                    ts = InputDevice(path)
+                    print(f"[shim] Auto-detected: {path}", flush=True)
+                    break
+                except Exception:
+                    continue
+            if ts:
+                break
+
+    if ts is None:
+        # Last resort: scan all event devices for multitouch capability
+        for path in sorted(glob.glob("/dev/input/event*")):
+            try:
+                dev = InputDevice(path)
+                caps = dev.capabilities(absinfo=False)
+                if ecodes.EV_ABS in caps:
+                    if ecodes.ABS_MT_POSITION_X in caps[ecodes.EV_ABS]:
+                        ts = dev
+                        print(
+                            f"[shim] Found touch device: {path} ({dev.name})",
+                            flush=True,
+                        )
+                        break
+            except Exception:
+                continue
+
+    if ts is None:
+        print("[shim] No touchscreen found", file=sys.stderr)
         sys.exit(1)
 
     # Read ABS ranges from the device itself

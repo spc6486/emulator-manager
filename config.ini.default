@@ -9,8 +9,8 @@ sheepshaver_path = ~/SheepShaver/SheepShaver.bin
 basilisk_path = ~/BasiliskII/BasiliskII.bin
 
 [device]
-# Touchscreen evdev path (stable by-id symlink)
-path = /dev/input/by-id/usb-UsbHID_SingWon-CTP-V1.18C_6F6A099B1133-event-if00
+# Touchscreen evdev path (leave empty to auto-detect)
+path =
 
 # Path to display-calibrator's udev calibration rule
 calibration_rule = /etc/udev/rules.d/99-touchscreen-calibration.rules
