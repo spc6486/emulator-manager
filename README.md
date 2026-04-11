@@ -1,40 +1,18 @@
 # Emulator Manager
 
-A system tray application and touch input shim for running SheepShaver and BasiliskII classic Mac emulators on Raspberry Pi touchscreen devices under Wayland compositors.
+A system tray launcher for SheepShaver and BasiliskII on Raspberry Pi touchscreen devices. Launch classic Mac emulators with one tap, configure display settings, and automatically work around the input and audio issues that affect these emulators under Wayland.
 
-## The problem
+## What it does
 
-When using a touchscreen with SheepShaver or BasiliskII, tapping a new location causes a ghost click at the previous touch position. This happens because the emulator receives a "button down + pointer jump" sequence — interpreting it as a drag from the old position rather than a tap at the new one.
+**Launches emulators from the system tray** — tap the tray icon, pick SheepShaver or BasiliskII, and the emulator starts immediately in no-GUI mode. No setup dialogs, no terminal commands. The tray shows which emulator is running and prevents launching a second one simultaneously.
 
-## How it works
+**Configures display settings** — set resolution and fullscreen/windowed mode per emulator from the Settings window. Initial values are read from each emulator's own prefs file (`~/.config/SheepShaver/prefs`, `~/.config/BasiliskII/prefs`) so what you see matches what's already configured.
 
-The shim grabs the touchscreen device (via evdev) while the emulator window is focused, preventing raw touch events from reaching the compositor. It re-injects mouse events via xdotool with correct sequencing — move to new position first, then press — eliminating the ghost-click artifact.
+**Fixes ghost clicks on touchscreens** — when using a touchscreen with SheepShaver or BasiliskII, tapping at a new location causes an unwanted click at the *previous* touch position. This happens because the emulator receives the pointer jump and button press as a single event, interpreting it as a drag from the old position rather than a tap at the new one. The included touch shim intercepts raw touchscreen events and re-injects them with correct sequencing (move first, then click), eliminating these ghost clicks entirely. The shim only activates when the emulator window is focused — normal desktop touch input is unaffected.
 
-When the emulator loses focus, the shim releases the touchscreen so normal desktop touch input works without interruption.
+**Prevents audio dropout** — SheepShaver and BasiliskII audio commonly stops after extended use due to PipeWire's stream management pausing underrunning clients. Enabling "Prevent audio dropout" in Settings writes drop-in configs for WirePlumber and PipeWire-Pulse that disable node suspension, increase buffer sizes, and route emulator audio through SDL's native PipeWire backend, bypassing the failure-prone pipewire-pulse translation layer.
 
-### Calibration
-
-Touch coordinate calibration is read automatically from the system's libinput calibration matrix at `/etc/udev/rules.d/99-touchscreen-calibration.rules`. If [display-calibrator](https://github.com/spc6486/display-calibrator) is installed, the shim uses its calibration with no additional setup. Recalibrating in display-calibrator takes effect on the next emulator launch, or immediately via `killall -HUP touch_shim.py`.
-
-If no calibration rule exists, the shim falls back to an identity matrix (no correction).
-
-## Features
-
-- **System tray launcher** — one-click emulator launch, no setup dialog
-- **Auto-discovery** — finds SheepShaver and BasiliskII in common install locations
-- **Focus-aware grab** — touchscreen works normally when emulator is not focused
-- **Long-press double-click** — hold 2 seconds to open files and folders
-- **Configurable behavior** — tap delay, hold timing, wobble tolerance
-- **SIGHUP hot-reload** — change settings without restarting the emulator
-- **Copy launch command** — paste directly into kiosk-manager or shell scripts
-- **Calibration integration** — reads display-calibrator's udev rule automatically
-
-## Requirements
-
-- Raspberry Pi with a USB touchscreen
-- Wayland compositor (labwc, Wayfire, or Sway)
-- SheepShaver and/or BasiliskII installed
-- Python 3, python3-gi, python3-evdev, xdotool
+**Protects against input lockout** — if the touch shim crashes while the emulator is running fullscreen, all input would be lost. A watchdog monitors the shim and automatically kills the emulator within two seconds if the shim dies, preventing a situation that would otherwise require SSH or a reboot to recover from.
 
 ## Install
 
@@ -45,9 +23,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer handles dependencies (`python3-evdev`, `python3-gi`, `gir1.2-ayatanaappindicator3-0.1`, `xdotool`), installs to `/opt/emulator-manager/`, creates autostart and menu entries, and sets up a default config.
-
-The tray icon appears on next login, or start it now:
+The installer handles dependencies, installs to `/opt/emulator-manager/`, and creates autostart and application menu entries. The tray icon appears on next login, or start it now:
 
 ```bash
 python3 /opt/emulator-manager/emulator-manager-tray.py &
@@ -59,72 +35,51 @@ python3 /opt/emulator-manager/emulator-manager-tray.py &
 sudo /opt/emulator-manager/install.sh --uninstall
 ```
 
-User configuration at `~/.config/emulator-manager/` is preserved.
+## Settings
 
-## Usage
+Open from the tray icon or from the application menu under Preferences.
 
-### From the tray
+### Emulators tab
 
-Click the tray icon to see available emulators. Tap one to launch it immediately with the touch shim active. The emulator starts in no-GUI mode (skipping the setup dialog).
+Per emulator: binary path (auto-discovered on first run), Open folder button to access the emulator's directory for ROM and prefs editing, Copy launch command for pasting into kiosk-manager or scripts, fullscreen toggle, and resolution dropdown.
 
-The tray shows running state and disables the other emulator while one is active.
+### Touch tab
 
-### From the command line
+Adjustable behavior for the touch shim: tap accuracy delay, hold-to-double-click timing, finger wobble allowance, and focus check responsiveness. Also displays the current calibration matrix from [display-calibrator](https://github.com/spc6486/display-calibrator) if installed.
 
-Launch any emulator directly without the tray app:
+### Audio tab
+
+Single toggle to enable audio dropout prevention. When enabled, the emulator wrapper creates WirePlumber and PipeWire-Pulse drop-in configs that only affect emulator processes.
+
+## CLI usage
+
+Launch emulators directly without the tray app:
 
 ```bash
-emu-wrapper --binary /path/to/SheepShaver.bin --window-name SheepShaver
-emu-wrapper --binary /path/to/BasiliskII.bin --window-name "Basilisk II"
+emu-wrapper --binary /path/to/SheepShaver.bin --window-name SheepShaver --nogui --screen win/1024/768
+emu-wrapper --binary /path/to/BasiliskII.bin --window-name "Basilisk II" --nogui --audio-fix
 ```
-
-### From kiosk-manager
-
-Use the "Copy launch command" button in Settings to get the full command string, then paste it into kiosk-manager's application path field.
 
 ## Configuration
 
-Edit `~/.config/emulator-manager/config.ini` or open Settings from the tray icon.
-
-### Emulator paths
-
-The tray app searches these locations on startup and fills in any empty paths:
-
-| Emulator | Search order |
-|----------|-------------|
-| SheepShaver | `~/SheepShaver/SheepShaver.bin`, `/usr/local/bin/SheepShaver`, `/opt/SheepShaver/SheepShaver.bin` |
-| BasiliskII | `~/BasiliskII/BasiliskII.bin`, `/usr/local/bin/BasiliskII`, `/opt/BasiliskII/BasiliskII.bin` |
-
-Manually configured paths are never overridden by auto-discovery.
-
-### Touch behavior
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Tap accuracy delay | 100 ms | Pause after fast finger moves to prevent misclicks |
-| Hold to double-click | 2.0 sec | Hold duration to trigger a double-click |
-| Finger wobble allowance | 30 px | Maximum drift during hold that still counts |
-| Responsiveness | 0.25 sec | How quickly the shim reacts to window focus changes |
-
-Reload settings without restarting: `killall -HUP touch_shim.py`
+Settings are stored at `~/.config/emulator-manager/config.ini`. Changes made in the Settings window take effect on Apply. Touch shim settings can also be reloaded without restarting: `killall -HUP touch_shim.py`.
 
 ## Files
 
 | Path | Purpose |
 |------|---------|
-| `/opt/emulator-manager/touch_shim.py` | Touch event shim |
-| `/opt/emulator-manager/emulator-manager-tray.py` | System tray application |
-| `/opt/emulator-manager/emu_wrapper.sh` | Emulator launcher with compositor detection |
-| `/usr/local/bin/emu-wrapper` | Symlink to emu_wrapper.sh |
+| `/opt/emulator-manager/` | Application files |
+| `/usr/local/bin/emu-wrapper` | Launcher symlink |
 | `~/.config/emulator-manager/config.ini` | User settings |
-| `/etc/xdg/autostart/emulator-manager.desktop` | Tray autostart on login |
-| `/usr/share/applications/emulator-manager.desktop` | Application menu entry |
+| `/etc/xdg/autostart/emulator-manager.desktop` | Tray autostart |
+| `/usr/share/applications/emulator-manager.desktop` | App menu entry |
 
-## Known limitations
+## Requirements
 
-- The touch shim addresses a ghost-click issue specific to SheepShaver and BasiliskII. Other emulators may not exhibit this problem.
-- Mouse injection uses xdotool (X11) via Xwayland. A native Wayland solution (ydotool) could replace this in the future.
-- The 180° display rotation compensation is currently hardcoded. Displays without rotation would need the rotation fix removed.
+- Raspberry Pi with a USB touchscreen
+- Wayland compositor (labwc, Wayfire, or Sway)
+- SheepShaver and/or BasiliskII
+- Python 3, python3-gi, python3-evdev, xdotool
 
 ## License
 
