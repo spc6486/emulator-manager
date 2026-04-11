@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Touch Shim — tray app for launching SheepShaver and BasiliskII with
-touch-fix shim on Raspberry Pi touchscreen devices.
+Emulator Manager — tray app for launching SheepShaver and BasiliskII
+with touch-fix shim on Raspberry Pi touchscreen devices.
 """
 
 import os
@@ -12,6 +12,7 @@ import subprocess
 import configparser
 import re
 import glob
+import shlex
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -23,15 +24,20 @@ except (ValueError, ImportError):
 
 from gi.repository import Gtk, GLib, Gdk
 
-APP_ID = "touch-shim"
-INSTALL_DIR = "/opt/touch-shim"
+APP_ID = "emulator-manager"
+INSTALL_DIR = "/opt/emulator-manager"
 WRAPPER_PATH = os.path.join(INSTALL_DIR, "emu_wrapper.sh")
-ICON_NAME = "touch-shim"
-CONFIG_DIR = os.path.expanduser("~/.config/touch-shim")
+ICON_NAME = "emulator-manager"
+CONFIG_DIR = os.path.expanduser("~/.config/emulator-manager")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.ini")
 LOCK_PATH = os.path.join(CONFIG_DIR, "tray.lock")
 UDEV_RULE_DEFAULT = "/etc/udev/rules.d/99-touchscreen-calibration.rules"
 VERSION_FILE = os.path.join(INSTALL_DIR, "VERSION")
+
+EMU_PREFS_PATHS = {
+    "sheepshaver": os.path.expanduser("~/.config/SheepShaver/prefs"),
+    "basilisk": os.path.expanduser("~/.config/BasiliskII/prefs"),
+}
 
 EMULATORS = [
     {"key": "sheepshaver", "name": "SheepShaver",
@@ -46,12 +52,42 @@ EMULATORS = [
                  "/opt/BasiliskII/BasiliskII.bin"]},
 ]
 
+SCREEN_RESOLUTIONS = [
+    "640x480", "800x600", "832x624", "1024x768",
+    "1152x870", "1280x1024", "1600x1200",
+]
+
 
 def get_version():
     try:
         return open(VERSION_FILE).read().strip()
     except FileNotFoundError:
         return "?"
+
+
+# ── Read emulator prefs ────────────────────────────────────────────
+
+def read_emu_screen(key):
+    """Parse the emulator's own prefs file for screen setting.
+    Returns (resolution, fullscreen) or (None, None) if not found."""
+    path = EMU_PREFS_PATHS.get(key)
+    if not path or not os.path.isfile(path):
+        return None, None
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("screen "):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        segs = parts[1].split("/")
+                        if len(segs) == 3:
+                            mode = segs[0]
+                            res = f"{segs[1]}x{segs[2]}"
+                            return res, mode.lower() == "dga"
+    except OSError:
+        pass
+    return None, None
 
 
 # ── Singleton ───────────────────────────────────────────────────────
@@ -92,14 +128,25 @@ class Config:
         self.save()
 
     def _ensure_sections(self):
-        for section in ("emulators", "behavior", "ui"):
+        for section in ("emulators", "behavior", "audio", "ui"):
             if not self.cp.has_section(section):
                 self.cp.add_section(section)
+        for emu in EMULATORS:
+            sect = f"launch.{emu['key']}"
+            if not self.cp.has_section(sect):
+                self.cp.add_section(sect)
+                # Seed from emulator prefs if available
+                res, fs = read_emu_screen(emu["key"])
+                self.cp.set(sect, "nogui", "true")
+                self.cp.set(sect, "screen_res", res or "1024x768")
+                self.cp.set(sect, "fullscreen",
+                            str(fs).lower() if fs is not None else "false")
         defaults = {
             ("behavior", "click_delay_ms", "100"),
             ("behavior", "long_press_time", "2.0"),
             ("behavior", "hold_tolerance", "30"),
             ("behavior", "focus_check_interval", "0.25"),
+            ("audio", "prevent_dropout", "false"),
             ("ui", "show_tray", "true"),
         }
         for section, key, val in defaults:
@@ -107,8 +154,6 @@ class Config:
                 self.cp.set(section, key, val)
 
     def _auto_discover(self):
-        """Fill in empty/broken emulator paths by searching common
-        locations. Manually configured paths are never overridden."""
         for emu in EMULATORS:
             key = f"{emu['key']}_path"
             current = self.cp.get("emulators", key, fallback="")
@@ -154,6 +199,20 @@ class Config:
     def show_tray(self):
         return self.getbool("ui", "show_tray", fallback=True)
 
+    @property
+    def prevent_dropout(self):
+        return self.getbool("audio", "prevent_dropout", fallback=False)
+
+    def launch_section(self, key):
+        return f"launch.{key}"
+
+    def get_screen_string(self, key):
+        sect = self.launch_section(key)
+        res = self.get(sect, "screen_res", fallback="1024x768")
+        fs = self.getbool(sect, "fullscreen", fallback=False)
+        prefix = "dga" if fs else "win"
+        return f"{prefix}/{res.replace('x', '/')}"
+
 
 # ── Calibration helper ──────────────────────────────────────────────
 
@@ -174,6 +233,23 @@ def read_calibration_info():
     return "1.000  0.000  0.000", "0.000  1.000  0.000", False
 
 
+# ── Build launch command ────────────────────────────────────────────
+
+def build_launch_cmd(config, emu):
+    key = emu["key"]
+    binary = config.emu_path(key)
+    parts = ["emu-wrapper", "--binary", binary, "--window-name", emu["window"]]
+    sect = config.launch_section(key)
+    if config.getbool(sect, "nogui", fallback=True):
+        parts.append("--nogui")
+    if config.prevent_dropout:
+        parts.append("--audio-fix")
+    screen = config.get_screen_string(key)
+    if screen:
+        parts.extend(["--screen", screen])
+    return " ".join(parts)
+
+
 # ── Emulator process ────────────────────────────────────────────────
 
 class EmulatorProcess:
@@ -185,17 +261,24 @@ class EmulatorProcess:
     def is_running(self):
         return self.proc is not None and self.proc.poll() is None
 
-    def launch(self, emu_key, binary_path, window_name):
+    def launch(self, config, emu):
         if self.is_running:
             return False
+        key = emu["key"]
+        binary = config.emu_path(key)
+        cmd = [WRAPPER_PATH, "--binary", binary,
+               "--window-name", emu["window"]]
+        sect = config.launch_section(key)
+        if config.getbool(sect, "nogui", fallback=True):
+            cmd.append("--nogui")
+        if config.prevent_dropout:
+            cmd.append("--audio-fix")
+        screen = config.get_screen_string(key)
+        if screen:
+            cmd.extend(["--screen", screen])
         try:
-            self.proc = subprocess.Popen(
-                [WRAPPER_PATH,
-                 "--binary", binary_path,
-                 "--window-name", window_name],
-                start_new_session=False,
-            )
-            self.running_key = emu_key
+            self.proc = subprocess.Popen(cmd, start_new_session=False)
+            self.running_key = key
             return True
         except Exception as exc:
             print(f"[{APP_ID}] Launch failed: {exc}", file=sys.stderr)
@@ -218,11 +301,10 @@ class SettingsWindow:
         self.config = config
         self.on_apply_cb = on_apply_cb
         self.win = Gtk.Window(
-            title="Touch Shim", default_width=440
+            title="Emulator Manager", default_width=440
         )
         self.win.set_position(Gtk.WindowPosition.CENTER)
         self.win.set_type_hint(Gdk.WindowTypeHint.DIALOG)
-        self.win.set_resizable(False)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         outer.set_margin_start(8)
@@ -231,41 +313,44 @@ class SettingsWindow:
         outer.set_margin_bottom(6)
         self.win.add(outer)
 
-        # Header (matches display-calibrator)
         header = Gtk.Label()
         header.set_markup(
-            f"<big><b>Touch Shim</b></big>  "
+            f"<big><b>Emulator Manager</b></big>  "
             f"<small>v{get_version()}</small>"
         )
         header.set_xalign(0)
         outer.pack_start(header, False, False, 0)
 
-        # Notebook
         notebook = Gtk.Notebook()
         outer.pack_start(notebook, True, True, 4)
 
         # ═══ Tab 1: Emulators ═══
-        emu_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        emu_page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         emu_page.set_margin_start(12)
         emu_page.set_margin_end(12)
         emu_page.set_margin_top(8)
         emu_page.set_margin_bottom(8)
 
         self.path_entries = {}
+        self.nogui_checks = {}
+        self.fullscreen_checks = {}
+        self.res_combos = {}
+
         for emu in EMULATORS:
             frame = Gtk.Frame()
             frame.set_shadow_type(Gtk.ShadowType.NONE)
             fbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
             fbox.set_margin_start(8)
             fbox.set_margin_end(8)
-            fbox.set_margin_top(8)
-            fbox.set_margin_bottom(8)
+            fbox.set_margin_top(4)
+            fbox.set_margin_bottom(4)
 
             lbl = Gtk.Label()
             lbl.set_markup(f"<b>{emu['name']}</b>")
             lbl.set_xalign(0)
             fbox.pack_start(lbl, False, False, 0)
 
+            # Binary path row
             hbox = Gtk.Box(
                 orientation=Gtk.Orientation.HORIZONTAL, spacing=6
             )
@@ -280,15 +365,65 @@ class SettingsWindow:
             hbox.pack_start(browse_btn, False, False, 0)
             fbox.pack_start(hbox, False, False, 0)
 
+            # Open folder + Copy launch command
+            action_box = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=6
+            )
+            open_btn = Gtk.Button(label="Open folder")
+            open_btn.set_tooltip_text(
+                "Open the emulator's directory in the file manager"
+            )
+            open_btn.connect("clicked", self._on_open_folder, entry)
+            action_box.pack_start(open_btn, False, False, 0)
+
             copy_btn = Gtk.Button(label="Copy launch command")
             copy_btn.set_tooltip_text(
                 "Copy CLI command for kiosk-manager or scripts"
             )
             copy_btn.connect(
-                "clicked", self._on_copy_command, entry, emu["window"]
+                "clicked", self._on_copy_command, emu
             )
-            copy_btn.set_halign(Gtk.Align.START)
-            fbox.pack_start(copy_btn, False, False, 0)
+            action_box.pack_start(copy_btn, False, False, 0)
+            fbox.pack_start(action_box, False, False, 0)
+
+            # Launch options — single compact row
+            sect = config.launch_section(emu["key"])
+
+            opt_box = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8
+            )
+
+            nogui_chk = Gtk.CheckButton(label="No GUI")
+            nogui_chk.set_active(
+                config.getbool(sect, "nogui", fallback=True)
+            )
+            self.nogui_checks[emu["key"]] = nogui_chk
+            opt_box.pack_start(nogui_chk, False, False, 0)
+
+            fs_chk = Gtk.CheckButton(label="Fullscreen")
+            fs_chk.set_active(
+                config.getbool(sect, "fullscreen", fallback=False)
+            )
+            self.fullscreen_checks[emu["key"]] = fs_chk
+            opt_box.pack_start(fs_chk, False, False, 0)
+
+            res_combo = Gtk.ComboBoxText()
+            current_res = config.get(
+                sect, "screen_res", fallback="1024x768"
+            )
+            active_idx = 0
+            for i, res in enumerate(SCREEN_RESOLUTIONS):
+                res_combo.append_text(res)
+                if res == current_res:
+                    active_idx = i
+            res_combo.set_active(active_idx)
+            self.res_combos[emu["key"]] = res_combo
+            opt_box.pack_end(res_combo, False, False, 0)
+
+            res_lbl = Gtk.Label(label="Res:")
+            opt_box.pack_end(res_lbl, False, False, 0)
+
+            fbox.pack_start(opt_box, False, False, 0)
 
             frame.add(fbox)
             emu_page.pack_start(frame, False, False, 0)
@@ -396,6 +531,33 @@ class SettingsWindow:
 
         notebook.append_page(touch_page, Gtk.Label(label="Touch"))
 
+        # ═══ Tab 3: Audio ═══
+        audio_page = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4
+        )
+        audio_page.set_margin_start(12)
+        audio_page.set_margin_end(12)
+        audio_page.set_margin_top(8)
+        audio_page.set_margin_bottom(8)
+
+        self.dropout_chk = Gtk.CheckButton(
+            label="Prevent audio dropout"
+        )
+        self.dropout_chk.set_active(config.prevent_dropout)
+        audio_page.pack_start(self.dropout_chk, False, False, 0)
+
+        audio_hint = Gtk.Label()
+        audio_hint.set_markup(
+            '<span size="x-small" foreground="gray">'
+            "Disables WirePlumber node suspension, sets larger\n"
+            "PipeWire-Pulse buffers, and uses SDL\u2019s native\n"
+            "PipeWire backend for emulator audio.</span>"
+        )
+        audio_hint.set_xalign(0)
+        audio_page.pack_start(audio_hint, False, False, 0)
+
+        notebook.append_page(audio_page, Gtk.Label(label="Audio"))
+
         # ── Bottom bar (matches display-calibrator) ──
         bottom = Gtk.Box(spacing=8)
         bottom.set_margin_top(4)
@@ -404,6 +566,10 @@ class SettingsWindow:
         self.tray_check.set_active(config.show_tray)
         self.tray_check.set_tooltip_text("Show system tray icon on login")
         bottom.pack_start(self.tray_check, False, False, 0)
+
+        self._status_label = Gtk.Label(label="")
+        self._status_label.get_style_context().add_class("dim-label")
+        bottom.pack_start(self._status_label, False, False, 4)
 
         btn_apply = Gtk.Button(label="Apply")
         btn_apply.get_style_context().add_class("suggested-action")
@@ -457,6 +623,10 @@ class SettingsWindow:
         parent.pack_start(Gtk.Separator(), False, False, 0)
         return spin
 
+    def _show_status(self, text, timeout_ms=2000):
+        self._status_label.set_text(text)
+        GLib.timeout_add(timeout_ms, lambda: self._status_label.set_text(""))
+
     def _on_browse(self, button, entry):
         dialog = Gtk.FileChooserDialog(
             title="Select emulator binary",
@@ -474,9 +644,28 @@ class SettingsWindow:
             entry.set_text(dialog.get_filename())
         dialog.destroy()
 
-    def _on_copy_command(self, button, entry, window_name):
-        binary = entry.get_text()
-        cmd = f"emu-wrapper --binary {binary} --window-name {window_name}"
+    def _on_open_folder(self, button, entry):
+        path = entry.get_text().strip()
+        if path:
+            folder = os.path.dirname(os.path.expanduser(path))
+        else:
+            folder = os.path.expanduser("~")
+        if not os.path.isdir(folder):
+            folder = os.path.expanduser("~")
+        try:
+            subprocess.Popen(
+                ["xdg-open", folder],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except Exception as e:
+            print(f"[{APP_ID}] Open folder: {e}", file=sys.stderr)
+
+    def _on_copy_command(self, button, emu):
+        # Collect current values first
+        self._collect_values()
+        cmd = build_launch_cmd(self.config, emu)
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(cmd, -1)
         clipboard.store()
@@ -484,26 +673,59 @@ class SettingsWindow:
         button.set_label("Copied!")
         GLib.timeout_add(1500, lambda: button.set_label(orig))
 
+    def _collect_values(self):
+        """Read all widget values into config without saving."""
+        for emu in EMULATORS:
+            key = emu["key"]
+            self.config.set_emu_path(
+                key, self.path_entries[key].get_text()
+            )
+            sect = self.config.launch_section(key)
+            self.config.set(
+                sect, "nogui",
+                str(self.nogui_checks[key].get_active()).lower()
+            )
+            self.config.set(
+                sect, "fullscreen",
+                str(self.fullscreen_checks[key].get_active()).lower()
+            )
+            self.config.set(
+                sect, "screen_res",
+                self.res_combos[key].get_active_text() or "1024x768"
+            )
+        self.config.set(
+            "behavior", "click_delay_ms",
+            int(self.click_delay.get_value())
+        )
+        self.config.set(
+            "behavior", "long_press_time",
+            round(self.long_press.get_value(), 1)
+        )
+        self.config.set(
+            "behavior", "hold_tolerance",
+            int(self.hold_tol.get_value())
+        )
+        self.config.set(
+            "behavior", "focus_check_interval",
+            round(self.focus_int.get_value(), 2)
+        )
+        self.config.set(
+            "audio", "prevent_dropout",
+            str(self.dropout_chk.get_active()).lower()
+        )
+        self.config.set(
+            "ui", "show_tray", self.tray_check.get_active()
+        )
+
     def _on_apply(self, _):
-        vals = {
-            "paths": {
-                emu["key"]: self.path_entries[emu["key"]].get_text()
-                for emu in EMULATORS
-            },
-            "click_delay_ms": int(self.click_delay.get_value()),
-            "long_press_time": round(self.long_press.get_value(), 1),
-            "hold_tolerance": int(self.hold_tol.get_value()),
-            "focus_check_interval": round(
-                self.focus_int.get_value(), 2
-            ),
-            "show_tray": self.tray_check.get_active(),
-        }
-        self.on_apply_cb(vals)
+        self._collect_values()
+        self.on_apply_cb()
+        self._show_status("Saved")
 
 
 # ── Tray application ───────────────────────────────────────────────
 
-class TouchShimApp:
+class EmulatorManagerApp:
     def __init__(self):
         self.config = Config()
         self.emu = EmulatorProcess()
@@ -524,6 +746,8 @@ class TouchShimApp:
             APP_ID, ICON_NAME,
             AppIndicator.IndicatorCategory.APPLICATION_STATUS,
         )
+        # Fallback theme path for hicolor cache miss
+        self.indicator.set_icon_theme_path(INSTALL_DIR)
         if self.config.show_tray:
             self.indicator.set_status(AppIndicator.IndicatorStatus.ACTIVE)
         else:
@@ -639,7 +863,7 @@ class TouchShimApp:
             dialog.run()
             dialog.destroy()
             return
-        if self.emu.launch(emu["key"], path, emu["window"]):
+        if self.emu.launch(self.config, emu):
             self._update_menu_state()
             GLib.timeout_add(500, self._poll_tick)
 
@@ -654,33 +878,15 @@ class TouchShimApp:
     def _on_settings_closed(self):
         self._settings_win = None
 
-    def _apply_settings(self, vals):
-        for key, path in vals["paths"].items():
-            self.config.set_emu_path(key, path)
-        self.config.set(
-            "behavior", "click_delay_ms", vals["click_delay_ms"]
-        )
-        self.config.set(
-            "behavior", "long_press_time", vals["long_press_time"]
-        )
-        self.config.set(
-            "behavior", "hold_tolerance", vals["hold_tolerance"]
-        )
-        self.config.set(
-            "behavior", "focus_check_interval",
-            vals["focus_check_interval"],
-        )
-        self.config.set("ui", "show_tray", vals["show_tray"])
+    def _apply_settings(self):
         self.config.save()
-
         if self.indicator:
             status = (
                 AppIndicator.IndicatorStatus.ACTIVE
-                if vals["show_tray"]
+                if self.config.show_tray
                 else AppIndicator.IndicatorStatus.PASSIVE
             )
             self.indicator.set_status(status)
-
         self._update_menu_state()
         subprocess.run(
             ["killall", "-HUP", "touch_shim.py"],
@@ -705,7 +911,7 @@ def main():
         cfg.set("ui", "show_tray", True)
         cfg.save()
 
-    app = TouchShimApp()
+    app = EmulatorManagerApp()
     app.run()
 
 

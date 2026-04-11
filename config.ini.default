@@ -1,12 +1,16 @@
-# touch-shim configuration
+# emulator-manager configuration
 #
 # Calibration is read automatically from display-calibrator's udev rule.
-# This file contains emulator paths, behavioral settings, and UI prefs.
+# This file contains emulator paths, launch options, behavioral settings,
+# audio settings, and UI prefs.
 
 [emulators]
 # Paths to emulator binaries (auto-detected on first run if not set)
 sheepshaver_path = ~/SheepShaver/SheepShaver.bin
 basilisk_path = ~/BasiliskII/BasiliskII.bin
+
+# Launch sections are auto-created on first run from emulator prefs
+# at ~/.config/SheepShaver/prefs and ~/.config/BasiliskII/prefs
 
 [device]
 # Touchscreen evdev path (leave empty to auto-detect)
@@ -32,6 +36,10 @@ hold_tolerance = 30
 
 # Seconds between focus checks (lower = more responsive, more CPU)
 focus_check_interval = 0.25
+
+[audio]
+# Enable PipeWire/WirePlumber audio dropout prevention
+prevent_dropout = false
 
 [ui]
 # Show the tray icon (set to false to hide; reopen from app menu)

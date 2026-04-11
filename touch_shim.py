@@ -23,7 +23,7 @@ import argparse
 import glob
 from evdev import InputDevice, ecodes
 
-# ── Defaults (overridden by ~/.config/touch-shim/config.ini) ────────
+# ── Defaults (overridden by ~/.config/emulator-manager/config.ini) ────────
 
 DEFAULT_DEVICE = ""
 DEFAULT_UDEV_RULE = "/etc/udev/rules.d/99-touchscreen-calibration.rules"
@@ -57,7 +57,7 @@ class Config:
     def load(self, path=None):
         """Load from INI file.  Missing file or keys use defaults."""
         if path is None:
-            path = os.path.expanduser("~/.config/touch-shim/config.ini")
+            path = os.path.expanduser("~/.config/emulator-manager/config.ini")
         cp = configparser.ConfigParser()
         cp.read(path)  # silently ignores missing file
 
@@ -319,6 +319,18 @@ def run(cfg, window_name):
 
     print("[shim] Running — waiting for focus", flush=True)
 
+    # ── SIGTERM handler: ungrab and exit cleanly ──
+    def handle_sigterm(signum, frame):
+        nonlocal button_pressed
+        print("[shim] SIGTERM — releasing grab and exiting", flush=True)
+        do_ungrab()
+        if button_pressed:
+            mouse_up()
+            button_pressed = False
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
+
     try:
         while True:
             # ── Focus check ──
@@ -435,7 +447,7 @@ def main():
     )
     parser.add_argument(
         "--config",
-        help="Path to config.ini (default: ~/.config/touch-shim/config.ini)",
+        help="Path to config.ini (default: ~/.config/emulator-manager/config.ini)",
     )
     args = parser.parse_args()
 

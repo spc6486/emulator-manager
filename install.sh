@@ -1,5 +1,5 @@
 #!/bin/bash
-# ── touch-shim installer ────────────────────────────────────────────
+# ── emulator-manager installer ──────────────────────────────────────
 #
 # Installs the unified touch shim + tray app for emulators.
 #
@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-APP_NAME="touch-shim"
+APP_NAME="emulator-manager"
 INSTALL_DIR="/opt/$APP_NAME"
 WRAPPER_LINK="/usr/local/bin/emu-wrapper"
 CONFIG_DIR="$HOME/.config/$APP_NAME"
@@ -22,11 +22,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
     echo "Removing $APP_NAME..."
-    pkill -f "touch-shim-tray" 2>/dev/null || true
+    pkill -f "emulator-manager-tray" 2>/dev/null || true
     pkill -f "touch_shim.py" 2>/dev/null || true
     sudo rm -rf "$INSTALL_DIR"
     sudo rm -f "$WRAPPER_LINK"
-    sudo rm -f "$ICON_DIR/$APP_NAME.svg"
+    sudo rm -f "$ICON_DIR/emulator-manager.svg"
     sudo rm -f "$DESKTOP_DIR/$APP_NAME.desktop"
     sudo rm -f "$AUTOSTART_DIR/$APP_NAME.desktop"
     sudo gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
@@ -62,11 +62,11 @@ fi
 echo "Installing to $INSTALL_DIR..."
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$SCRIPT_DIR/touch_shim.py"      "$INSTALL_DIR/"
-sudo cp "$SCRIPT_DIR/touch-shim-tray.py" "$INSTALL_DIR/"
+sudo cp "$SCRIPT_DIR/emulator-manager-tray.py" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/emu_wrapper.sh"     "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/VERSION"            "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/touch_shim.py"
-sudo chmod +x "$INSTALL_DIR/touch-shim-tray.py"
+sudo chmod +x "$INSTALL_DIR/emulator-manager-tray.py"
 sudo chmod +x "$INSTALL_DIR/emu_wrapper.sh"
 
 # ── Create launcher symlink ──
@@ -79,10 +79,10 @@ sudo ln -s "$INSTALL_DIR/emu_wrapper.sh" "$WRAPPER_LINK"
 
 echo "Installing icon..."
 sudo mkdir -p "$ICON_DIR"
-if [[ -f "$SCRIPT_DIR/$APP_NAME.svg" ]]; then
-    sudo cp "$SCRIPT_DIR/$APP_NAME.svg" "$ICON_DIR/"
+if [[ -f "$SCRIPT_DIR/emulator-manager.svg" ]]; then
+    sudo cp "$SCRIPT_DIR/emulator-manager.svg" "$ICON_DIR/"
 else
-    echo "  Warning: $APP_NAME.svg not found in $SCRIPT_DIR"
+    echo "  Warning: emulator-manager.svg not found in $SCRIPT_DIR"
 fi
 sudo gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
 
@@ -91,16 +91,16 @@ sudo gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
 echo "Creating desktop entry..."
 sudo tee "$DESKTOP_DIR/$APP_NAME.desktop" >/dev/null <<EOF
 [Desktop Entry]
-Name=Touch Shim
-Comment=Emulator touch shim launcher and settings
-Exec=/usr/bin/python3 $INSTALL_DIR/touch-shim-tray.py --show-tray
+Name=Emulator Manager
+Comment=Touch shim and launcher for Mac emulators
+Exec=/usr/bin/python3 $INSTALL_DIR/emulator-manager-tray.py --show-tray
 Icon=$APP_NAME
 Type=Application
 Categories=Settings;
 Actions=Uninstall;
 
 [Desktop Action Uninstall]
-Name=Uninstall Touch Shim
+Name=Uninstall Emulator Manager
 Exec=sh -c "sudo $INSTALL_DIR/install.sh --uninstall"
 EOF
 
@@ -109,8 +109,8 @@ EOF
 echo "Creating autostart entry..."
 sudo tee "$AUTOSTART_DIR/$APP_NAME.desktop" >/dev/null <<EOF
 [Desktop Entry]
-Name=Touch Shim
-Exec=bash -c "sleep 3 && /usr/bin/python3 $INSTALL_DIR/touch-shim-tray.py"
+Name=Emulator Manager
+Exec=bash -c "sleep 3 && /usr/bin/python3 $INSTALL_DIR/emulator-manager-tray.py"
 Type=Application
 NoDisplay=true
 X-GNOME-Autostart-enabled=true
@@ -139,7 +139,7 @@ echo ""
 echo "  Application:  $INSTALL_DIR/"
 echo "  Config:       $CONFIG_DIR/config.ini"
 echo "  Tray icon:    appears in system tray on next login"
-echo "  App menu:     Settings → Touch Shim"
+echo "  App menu:     Settings → Emulator Manager"
 echo ""
-echo "  Start now:    python3 $INSTALL_DIR/touch-shim-tray.py &"
+echo "  Start now:    python3 $INSTALL_DIR/emulator-manager-tray.py &"
 echo "  Kiosk usage:  emu-wrapper --binary /path/to/emu --window-name Name"

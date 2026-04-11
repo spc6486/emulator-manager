@@ -1,4 +1,4 @@
-# Touch Shim
+# Emulator Manager
 
 A system tray application and touch input shim for running SheepShaver and BasiliskII classic Mac emulators on Raspberry Pi touchscreen devices under Wayland compositors.
 
@@ -39,27 +39,27 @@ If no calibration rule exists, the shim falls back to an identity matrix (no cor
 ## Install
 
 ```bash
-git clone https://github.com/spc6486/touch-shim.git
-cd touch-shim
+git clone https://github.com/spc6486/emulator-manager.git
+cd emulator-manager
 chmod +x install.sh
 ./install.sh
 ```
 
-The installer handles dependencies (`python3-evdev`, `python3-gi`, `gir1.2-ayatanaappindicator3-0.1`, `xdotool`), installs to `/opt/touch-shim/`, creates autostart and menu entries, and sets up a default config.
+The installer handles dependencies (`python3-evdev`, `python3-gi`, `gir1.2-ayatanaappindicator3-0.1`, `xdotool`), installs to `/opt/emulator-manager/`, creates autostart and menu entries, and sets up a default config.
 
 The tray icon appears on next login, or start it now:
 
 ```bash
-python3 /opt/touch-shim/touch-shim-tray.py &
+python3 /opt/emulator-manager/emulator-manager-tray.py &
 ```
 
 ## Uninstall
 
 ```bash
-sudo /opt/touch-shim/install.sh --uninstall
+sudo /opt/emulator-manager/install.sh --uninstall
 ```
 
-User configuration at `~/.config/touch-shim/` is preserved.
+User configuration at `~/.config/emulator-manager/` is preserved.
 
 ## Usage
 
@@ -84,7 +84,7 @@ Use the "Copy launch command" button in Settings to get the full command string,
 
 ## Configuration
 
-Edit `~/.config/touch-shim/config.ini` or open Settings from the tray icon.
+Edit `~/.config/emulator-manager/config.ini` or open Settings from the tray icon.
 
 ### Emulator paths
 
@@ -112,13 +112,13 @@ Reload settings without restarting: `killall -HUP touch_shim.py`
 
 | Path | Purpose |
 |------|---------|
-| `/opt/touch-shim/touch_shim.py` | Touch event shim |
-| `/opt/touch-shim/touch-shim-tray.py` | System tray application |
-| `/opt/touch-shim/emu_wrapper.sh` | Emulator launcher with compositor detection |
+| `/opt/emulator-manager/touch_shim.py` | Touch event shim |
+| `/opt/emulator-manager/emulator-manager-tray.py` | System tray application |
+| `/opt/emulator-manager/emu_wrapper.sh` | Emulator launcher with compositor detection |
 | `/usr/local/bin/emu-wrapper` | Symlink to emu_wrapper.sh |
-| `~/.config/touch-shim/config.ini` | User settings |
-| `/etc/xdg/autostart/touch-shim.desktop` | Tray autostart on login |
-| `/usr/share/applications/touch-shim.desktop` | Application menu entry |
+| `~/.config/emulator-manager/config.ini` | User settings |
+| `/etc/xdg/autostart/emulator-manager.desktop` | Tray autostart on login |
+| `/usr/share/applications/emulator-manager.desktop` | Application menu entry |
 
 ## Known limitations
 
