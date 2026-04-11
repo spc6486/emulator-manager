@@ -23,6 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ "${1:-}" == "--uninstall" ]]; then
     echo "Removing $APP_NAME..."
     pkill -f "emulator-manager-tray" 2>/dev/null || true
+    pkill -f "idle-bridge.py" 2>/dev/null || true
     pkill -f "touch_shim.py" 2>/dev/null || true
     sudo rm -rf "$INSTALL_DIR"
     sudo rm -f "$WRAPPER_LINK"
@@ -62,10 +63,12 @@ fi
 echo "Installing to $INSTALL_DIR..."
 sudo mkdir -p "$INSTALL_DIR"
 sudo cp "$SCRIPT_DIR/touch_shim.py"      "$INSTALL_DIR/"
+sudo cp "$SCRIPT_DIR/idle-bridge.py"     "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/emulator-manager-tray.py" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/emu_wrapper.sh"     "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/VERSION"            "$INSTALL_DIR/"
 sudo chmod +x "$INSTALL_DIR/touch_shim.py"
+sudo chmod +x "$INSTALL_DIR/idle-bridge.py"
 sudo chmod +x "$INSTALL_DIR/emulator-manager-tray.py"
 sudo chmod +x "$INSTALL_DIR/emu_wrapper.sh"
 
@@ -110,7 +113,7 @@ echo "Creating autostart entry..."
 sudo tee "$AUTOSTART_DIR/$APP_NAME.desktop" >/dev/null <<EOF
 [Desktop Entry]
 Name=Emulator Manager
-Exec=bash -c "sleep 3 && /usr/bin/python3 $INSTALL_DIR/emulator-manager-tray.py"
+Exec=bash -c "/usr/bin/python3 $INSTALL_DIR/idle-bridge.py & sleep 3 && /usr/bin/python3 $INSTALL_DIR/emulator-manager-tray.py"
 Type=Application
 NoDisplay=true
 X-GNOME-Autostart-enabled=true

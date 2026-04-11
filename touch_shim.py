@@ -317,6 +317,32 @@ def run(cfg, window_name):
             except OSError:
                 pass
 
+    # ── Idle reset: signal idle-bridge to inject an event ──
+    # idle-bridge.py holds a UInput device open. On SIGUSR1 it injects
+    # a no-op event that brightness-control sees, resetting idle timer.
+    idle_bridge_pid = None
+    try:
+        pid_str = open("/tmp/emulator-manager-idle.pid").read().strip()
+        idle_bridge_pid = int(pid_str)
+        os.kill(idle_bridge_pid, 0)  # verify it's alive
+        print(
+            f"[shim] Idle reset via idle-bridge (pid {idle_bridge_pid})",
+            flush=True,
+        )
+    except (OSError, ValueError, FileNotFoundError):
+        idle_bridge_pid = None
+        print("[shim] Warning: idle-bridge not running — "
+              "backlight may dim during use", flush=True)
+
+    def poke_idle():
+        """Signal idle-bridge to inject an input event."""
+        if idle_bridge_pid is None:
+            return
+        try:
+            os.kill(idle_bridge_pid, signal.SIGUSR1)
+        except OSError:
+            pass
+
     print("[shim] Running — waiting for focus", flush=True)
 
     # ── SIGTERM handler: ungrab and exit cleanly ──
@@ -397,6 +423,9 @@ def run(cfg, window_name):
                         touch_start_x = screen_x
                         touch_start_y = screen_y
                         max_movement = 0
+
+                        # Reset idle timer for evdev-based detectors
+                        poke_idle()
 
                     elif ev.value == 0:  # ── Touch up ──
                         if button_pressed:
