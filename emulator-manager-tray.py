@@ -242,8 +242,6 @@ def build_launch_cmd(config, emu):
     sect = config.launch_section(key)
     if config.getbool(sect, "nogui", fallback=True):
         parts.append("--nogui")
-    if config.prevent_dropout:
-        parts.append("--audio-fix")
     screen = config.get_screen_string(key)
     if screen:
         parts.extend(["--screen", screen])
@@ -271,8 +269,6 @@ class EmulatorProcess:
         sect = config.launch_section(key)
         if config.getbool(sect, "nogui", fallback=True):
             cmd.append("--nogui")
-        if config.prevent_dropout:
-            cmd.append("--audio-fix")
         screen = config.get_screen_string(key)
         if screen:
             cmd.extend(["--screen", screen])
@@ -540,18 +536,20 @@ class SettingsWindow:
         audio_page.set_margin_top(8)
         audio_page.set_margin_bottom(8)
 
-        self.dropout_chk = Gtk.CheckButton(
-            label="Prevent audio dropout"
+        audio_status = Gtk.Label()
+        audio_status.set_markup(
+            '<span foreground="#639922">\u25cf Active</span>'
         )
-        self.dropout_chk.set_active(config.prevent_dropout)
-        audio_page.pack_start(self.dropout_chk, False, False, 0)
+        audio_status.set_xalign(0)
+        audio_page.pack_start(audio_status, False, False, 0)
 
         audio_hint = Gtk.Label()
         audio_hint.set_markup(
             '<span size="x-small" foreground="gray">'
-            "Disables WirePlumber node suspension, sets larger\n"
-            "PipeWire-Pulse buffers, and uses SDL\u2019s native\n"
-            "PipeWire backend for emulator audio.</span>"
+            "A silent audio keepalive stream runs alongside the\n"
+            "emulator to prevent the vc4-hdmi driver from\n"
+            "deadlocking. SDL uses the native PipeWire backend.\n\n"
+            "This is always active — no configuration needed.</span>"
         )
         audio_hint.set_xalign(0)
         audio_page.pack_start(audio_hint, False, False, 0)
@@ -708,10 +706,6 @@ class SettingsWindow:
         self.config.set(
             "behavior", "focus_check_interval",
             round(self.focus_int.get_value(), 2)
-        )
-        self.config.set(
-            "audio", "prevent_dropout",
-            str(self.dropout_chk.get_active()).lower()
         )
         self.config.set(
             "ui", "show_tray", self.tray_check.get_active()

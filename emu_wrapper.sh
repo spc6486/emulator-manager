@@ -8,7 +8,7 @@
 #   /opt/emulator-manager/emu_wrapper.sh \
 #       --binary /home/pi/SheepShaver/SheepShaver.bin \
 #       --window-name SheepShaver \
-#       [--nogui] [--screen win/1024/768] [--audio-fix] \
+#       [--nogui] [--screen win/1024/768] \
 #       [-- extra emulator args]
 
 set -euo pipefail
@@ -17,11 +17,11 @@ SHIM="/opt/emulator-manager/touch_shim.py"
 SHIM_PID=""
 EMU_PID=""
 WATCHDOG_PID=""
+KEEPALIVE_PID=""
 EMU_BINARY=""
 WINDOW_NAME=""
 NOGUI=false
 SCREEN=""
-AUDIO_FIX=false
 EMU_ARGS=()
 
 # ── Parse arguments ──
@@ -32,7 +32,6 @@ while [[ $# -gt 0 ]]; do
         --window-name) WINDOW_NAME="$2"; shift 2 ;;
         --nogui)       NOGUI=true; shift ;;
         --screen)      SCREEN="$2"; shift 2 ;;
-        --audio-fix)   AUDIO_FIX=true; shift ;;
         --)            shift; EMU_ARGS=("$@"); break ;;
         *)             EMU_ARGS+=("$1"); shift ;;
     esac
@@ -86,61 +85,16 @@ detect_display() {
 detect_display
 echo "[wrapper] DISPLAY=$DISPLAY"
 
-# ── Audio fix: WirePlumber + PipeWire-Pulse drop-ins ──
+# ── Audio: keepalive stream ──
+# Prevents the vc4-hdmi driver from deadlocking when its PCM stream
+# tears down and fails to restart. Without this, audio dropout causes
+# SheepShaver to freeze entirely. With it, audio may still drop out
+# (a SheepShaver ARM64 bug) but the emulator keeps running.
 
-if [[ "$AUDIO_FIX" == "true" ]]; then
-    echo "[wrapper] Setting up audio dropout prevention..."
-
-    WP_DIR="$HOME/.config/wireplumber/wireplumber.conf.d"
-    PP_DIR="$HOME/.config/pipewire/pipewire-pulse.conf.d"
-    mkdir -p "$WP_DIR" "$PP_DIR"
-
-    cat > "$WP_DIR/emulator-manager.conf" << 'WPEOF'
-monitor.alsa.rules = [
-  {
-    matches = [
-      { node.name = "~alsa_output.*" }
-      { node.name = "~alsa_input.*" }
-    ]
-    actions = {
-      update-props = {
-        session.suspend-timeout-seconds = 0
-      }
-    }
-  }
-]
-WPEOF
-
-    cat > "$PP_DIR/emulator-manager.conf" << 'PPEOF'
-pulse.rules = [
-  {
-    matches = [ { application.process.binary = "SheepShaver" } ]
-    actions = {
-      update-props = {
-        pulse.min.req = 2048/48000
-        pulse.min.quantum = 2048/48000
-        pulse.idle.timeout = 0
-      }
-    }
-  }
-  {
-    matches = [ { application.process.binary = "BasiliskII" } ]
-    actions = {
-      update-props = {
-        pulse.min.req = 2048/48000
-        pulse.min.quantum = 2048/48000
-        pulse.idle.timeout = 0
-      }
-    }
-  }
-]
-PPEOF
-
-    systemctl --user restart pipewire.service pipewire-pulse.service wireplumber.service 2>/dev/null || true
-    sleep 0.5
-    export SDL_AUDIODRIVER=pipewire
-    echo "[wrapper] Audio fix active (SDL_AUDIODRIVER=$SDL_AUDIODRIVER)"
-fi
+pacat --playback --format=s16le --rate=44100 --channels=2 --volume=0 < /dev/zero &
+KEEPALIVE_PID=$!
+sleep 0.3
+echo "[wrapper] Audio keepalive active (pid=$KEEPALIVE_PID)"
 
 # ── Cleanup on exit ──
 
@@ -149,9 +103,11 @@ cleanup() {
     if [[ -n "$WATCHDOG_PID" ]]; then
         kill "$WATCHDOG_PID" 2>/dev/null || true
     fi
+    if [[ -n "$KEEPALIVE_PID" ]]; then
+        kill "$KEEPALIVE_PID" 2>/dev/null || true
+    fi
     if [[ -n "$SHIM_PID" ]]; then
         kill "$SHIM_PID" 2>/dev/null || true
-        # Wait briefly, then SIGKILL if it didn't die (prevents stuck grab)
         sleep 0.5
         if kill -0 "$SHIM_PID" 2>/dev/null; then
             echo "[wrapper] Shim didn't exit cleanly — sending SIGKILL"
@@ -163,7 +119,7 @@ cleanup() {
         kill "$EMU_PID" 2>/dev/null || true
         wait "$EMU_PID" 2>/dev/null || true
     fi
-    # Close any stale emulator windows left by DGA fullscreen
+    # Close stale DGA fullscreen windows
     xdotool search --name "$WINDOW_NAME" windowclose 2>/dev/null || true
     xset s on +dpms 2>/dev/null || true
     echo "[wrapper] Done."
