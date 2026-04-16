@@ -30,8 +30,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     sudo rm -f "$ICON_DIR/emulator-manager.svg"
     sudo rm -f "$DESKTOP_DIR/$APP_NAME.desktop"
     sudo rm -f "$AUTOSTART_DIR/$APP_NAME.desktop"
-    sudo rm -f /etc/udev/rules.d/99-uinput.rules
-    sudo udevadm control --reload 2>/dev/null || true
+    sudo rm -f /etc/sudoers.d/emulator-manager
     rm -f /tmp/emulator-manager-idle.pid
     sudo gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
     echo "Preserved: $CONFIG_DIR (user config)"
@@ -63,13 +62,14 @@ fi
 
 # ── Ensure uinput is accessible (needed for idle-bridge) ──
 
-UINPUT_RULE="/etc/udev/rules.d/99-uinput.rules"
-if [[ ! -f "$UINPUT_RULE" ]]; then
-    echo "Creating uinput permissions rule..."
-    echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee "$UINPUT_RULE" >/dev/null
-    sudo udevadm control --reload
-    sudo udevadm trigger /dev/uinput 2>/dev/null || true
-fi
+SUDOERS_DROPIN="/etc/sudoers.d/emulator-manager"
+echo "Creating sudoers drop-in for uinput access..."
+sudo tee "$SUDOERS_DROPIN" >/dev/null << EOF
+# emulator-manager: allow idle-bridge to fix /dev/uinput permissions
+$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/chmod 660 /dev/uinput
+$(whoami) ALL=(ALL) NOPASSWD: /usr/bin/chgrp input /dev/uinput
+EOF
+sudo chmod 440 "$SUDOERS_DROPIN"
 
 # ── Install application files ──
 

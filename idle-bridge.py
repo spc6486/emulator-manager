@@ -29,7 +29,18 @@ signal.signal(signal.SIGTERM, cleanup)
 signal.signal(signal.SIGUSR1, on_poke)
 
 try:
+    import subprocess
     from evdev import UInput, ecodes
+
+    # Ensure /dev/uinput is accessible (sudoers drop-in allows this)
+    subprocess.run(
+        ["sudo", "chmod", "660", "/dev/uinput"],
+        capture_output=True, timeout=5,
+    )
+    subprocess.run(
+        ["sudo", "chgrp", "input", "/dev/uinput"],
+        capture_output=True, timeout=5,
+    )
 
     dev = UInput(
         {ecodes.EV_REL: [ecodes.REL_MISC]},
