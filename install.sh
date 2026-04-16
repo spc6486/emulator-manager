@@ -30,6 +30,9 @@ if [[ "${1:-}" == "--uninstall" ]]; then
     sudo rm -f "$ICON_DIR/emulator-manager.svg"
     sudo rm -f "$DESKTOP_DIR/$APP_NAME.desktop"
     sudo rm -f "$AUTOSTART_DIR/$APP_NAME.desktop"
+    sudo rm -f /etc/udev/rules.d/99-uinput.rules
+    sudo udevadm control --reload 2>/dev/null || true
+    rm -f /tmp/emulator-manager-idle.pid
     sudo gtk-update-icon-cache /usr/share/icons/hicolor 2>/dev/null || true
     echo "Preserved: $CONFIG_DIR (user config)"
     echo "Uninstall complete."
@@ -56,6 +59,16 @@ if ! groups | grep -qw input; then
     echo "Adding $(whoami) to input group..."
     sudo usermod -aG input "$(whoami)"
     echo "  Note: log out and back in for group change to take effect"
+fi
+
+# ── Ensure uinput is accessible (needed for idle-bridge) ──
+
+UINPUT_RULE="/etc/udev/rules.d/99-uinput.rules"
+if [[ ! -f "$UINPUT_RULE" ]]; then
+    echo "Creating uinput permissions rule..."
+    echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee "$UINPUT_RULE" >/dev/null
+    sudo udevadm control --reload
+    sudo udevadm trigger /dev/uinput 2>/dev/null || true
 fi
 
 # ── Install application files ──

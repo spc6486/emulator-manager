@@ -90,11 +90,20 @@ echo "[wrapper] DISPLAY=$DISPLAY"
 # tears down and fails to restart. Without this, audio dropout causes
 # SheepShaver to freeze entirely. With it, audio may still drop out
 # (a SheepShaver ARM64 bug) but the emulator keeps running.
+# Retries if PipeWire isn't ready yet (common at boot).
 
-pacat --playback --format=s16le --rate=44100 --channels=2 --volume=0 < /dev/zero &
-KEEPALIVE_PID=$!
-sleep 0.3
-echo "[wrapper] Audio keepalive active (pid=$KEEPALIVE_PID)"
+for _try in 1 2 3; do
+    pacat --playback --format=s16le --rate=44100 --channels=2 --volume=0 < /dev/zero &
+    KEEPALIVE_PID=$!
+    sleep 0.5
+    if kill -0 "$KEEPALIVE_PID" 2>/dev/null; then
+        echo "[wrapper] Audio keepalive active (pid=$KEEPALIVE_PID)"
+        break
+    fi
+    echo "[wrapper] Audio keepalive failed (attempt $_try), retrying..."
+    KEEPALIVE_PID=""
+    sleep 2
+done
 
 # ── Cleanup on exit ──
 
