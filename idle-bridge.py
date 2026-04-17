@@ -29,23 +29,23 @@ signal.signal(signal.SIGTERM, cleanup)
 signal.signal(signal.SIGUSR1, on_poke)
 
 try:
-    import subprocess
     from evdev import UInput, ecodes
 
-    # Ensure /dev/uinput is accessible (sudoers drop-in allows this)
-    subprocess.run(
-        ["sudo", "chmod", "660", "/dev/uinput"],
-        capture_output=True, timeout=5,
-    )
-    subprocess.run(
-        ["sudo", "chgrp", "input", "/dev/uinput"],
-        capture_output=True, timeout=5,
-    )
-
-    dev = UInput(
-        {ecodes.EV_REL: [ecodes.REL_MISC]},
-        name="emulator-manager-idle",
-    )
+    # Retry opening /dev/uinput — the udev rule may not have applied
+    # yet immediately after boot.
+    dev = None
+    for attempt in range(10):
+        try:
+            dev = UInput(
+                {ecodes.EV_REL: [ecodes.REL_MISC]},
+                name="emulator-manager-idle",
+            )
+            break
+        except (PermissionError, OSError) as exc:
+            if attempt < 9:
+                time.sleep(1)
+            else:
+                raise exc
 
     with open(PIDFILE, "w") as f:
         f.write(str(os.getpid()))
