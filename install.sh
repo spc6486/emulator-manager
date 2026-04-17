@@ -66,7 +66,7 @@ fi
 
 UINPUT_RULE="/etc/udev/rules.d/99-uinput.rules"
 echo "Creating uinput permissions rule..."
-echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee "$UINPUT_RULE" >/dev/null
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee "$UINPUT_RULE" >/dev/null
 sudo udevadm control --reload 2>/dev/null || true
 # Clean up old sudoers drop-in from previous versions
 sudo rm -f /etc/sudoers.d/emulator-manager 2>/dev/null || true
